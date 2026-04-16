@@ -198,6 +198,46 @@
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
         }
 
+        /* Pesquisa de Esquadras */
+        .search-container {
+            max-width: 500px;
+            margin: 0 auto 2rem;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            padding-left: 3rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 50px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            transform: scale(1.02);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 1.2rem;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.2rem;
+            opacity: 0.5;
+        }
+
+        .search-results-info {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
         /* Alertas */
         .alert {
             padding: 1.5rem;
@@ -499,30 +539,16 @@
             <!-- Esquadras Disponíveis -->
             <h2 class="section-title" id="esquadras">Esquadras Disponíveis</h2>
 
-            <div class="grid-esquadras">
-                <div class="card-esquadra" onclick="selecionarEsquadra(1)">
-                    <h3>🏛️ Esquadra Central de Lisboa</h3>
-                    <p>📍 Praça da Figueira, Lisboa</p>
-                    <p>📞 21 345 6789</p>
-                    <span class="tag-agendar">Agendar →</span>
-                </div>
-                <div class="card-esquadra" onclick="selecionarEsquadra(2)">
-                    <h3>🌊 Esquadra do Porto</h3>
-                    <p>📍 Rua da Constituição, Porto</p>
-                    <p>📞 22 123 4567</p>
-                    <span class="tag-agendar">Agendar →</span>
-                </div>
-                <div class="card-esquadra" onclick="selecionarEsquadra(3)">
-                    <h3>📚 Esquadra de Coimbra</h3>
-                    <p>📍 Avenida Sá da Bandeira, Coimbra</p>
-                    <p>📞 23 987 6543</p>
-                    <span class="tag-agendar">Agendar →</span>
-                </div>
-                <div class="card-esquadra" onclick="selecionarEsquadra(4)">
-                    <h3>🏖️ Esquadra de Faro</h3>
-                    <p>📍 Rua do Alportel, Faro</p>
-                    <p>📞 28 456 7890</p>
-                    <span class="tag-agendar">Agendar →</span>
+            <div class="search-container">
+                <span class="search-icon">🔍</span>
+                <input type="text" class="search-input" id="pesquisarEsquadra" placeholder="Pesquisar esquadra..." oninput="filtrarEsquadras()">
+            </div>
+            <p class="search-results-info" id="resultsInfo"></p>
+
+            <div class="grid-esquadras" id="gridEsquadras">
+                <div class="card-esquadra" style="grid-column: 1/-1; text-align: center; padding: 3rem;">
+                    <span style="font-size: 2rem;">⏳</span>
+                    <p style="margin-top: 1rem; color: #666;">A carregar esquadras...</p>
                 </div>
             </div>
 
@@ -565,6 +591,73 @@
     </footer>
 
     <script>
+    let esquadras = [];
+
+    // Carregar esquadras ao iniciar
+    document.addEventListener('DOMContentLoaded', () => {
+        carregarEsquadras();
+    });
+
+    async function carregarEsquadras() {
+        try {
+            const response = await fetch('api_esquadras.php');
+            if (!response.ok) throw new Error('Erro ao carregar');
+            esquadras = await response.json();
+            renderizarEsquadras(esquadras);
+        } catch (error) {
+            console.error('Erro:', error);
+            document.getElementById('gridEsquadras').innerHTML = `
+                <div class="card-esquadra" style="grid-column: 1/-1; text-align: center; padding: 3rem;">
+                    <span style="font-size: 2rem;">⚠️</span>
+                    <p style="margin-top: 1rem; color: #666;">Erro ao carregar esquadras. Tente novamente.</p>
+                    <button class="btn btn-primary" style="margin-top: 1rem;" onclick="carregarEsquadras()">Tentar novamente</button>
+                </div>
+            `;
+        }
+    }
+
+    function renderizarEsquadras(lista) {
+        const grid = document.getElementById('gridEsquadras');
+        const info = document.getElementById('resultsInfo');
+
+        if (lista.length === 0) {
+            grid.innerHTML = `
+                <div class="card-esquadra" style="grid-column: 1/-1; text-align: center; padding: 3rem;">
+                    <span style="font-size: 2rem;">🔍</span>
+                    <p style="margin-top: 1rem; color: #666;">Nenhuma esquadra encontrada.</p>
+                </div>
+            `;
+            info.textContent = '';
+            return;
+        }
+
+        info.textContent = `${lista.length} esquadra${lista.length !== 1 ? 's' : ''} encontrada${lista.length !== 1 ? 's' : ''}`;
+
+        grid.innerHTML = lista.map(esquadra => `
+            <div class="card-esquadra" onclick="selecionarEsquadra(${esquadra.id})">
+                <h3>🏛️ ${escapeHtml(esquadra.nome)}</h3>
+                <p>📍 ${escapeHtml(esquadra.morada)}</p>
+                <p>📞 ${escapeHtml(esquadra.telefone)}</p>
+                <span class="tag-agendar">Agendar →</span>
+            </div>
+        `).join('');
+    }
+
+    function filtrarEsquadras() {
+        const termo = document.getElementById('pesquisarEsquadra').value.toLowerCase().trim();
+        const filtradas = esquadras.filter(e =>
+            e.nome.toLowerCase().includes(termo) ||
+            e.morada.toLowerCase().includes(termo)
+        );
+        renderizarEsquadras(filtradas);
+    }
+
+    function escapeHtml(texto) {
+        const div = document.createElement('div');
+        div.textContent = texto;
+        return div.innerHTML;
+    }
+
     function selecionarEsquadra(esquadraId) {
         window.location.href = 'servicos.php?esquadra_id=' + esquadraId;
     }

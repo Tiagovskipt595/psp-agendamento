@@ -68,10 +68,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$esquadraId, $servicoId, $codigo, $nome, $cc, $email, $telemovel, $data, $hora]);
 
+            // Buscar ID do agendamento criado
+            $stmt = $db->prepare("SELECT id FROM agendamentos WHERE codigo_agendamento = ?");
+            $stmt->execute([$codigo]);
+            $agendamentoId = $stmt->fetch()['id'];
+
+            $emailEnviado = false;
+            $smsEnviado = false;
+
             // Enviar email de confirmação
             try {
-                enviarEmailConfirmacao($codigo, $db);
-                error_log("Email de confirmação enviado para: " . $email);
+                $resultadoEmail = enviarEmailConfirmacao($codigo, $db);
+                if ($resultadoEmail) {
+                    $emailEnviado = true;
+                    error_log("Email de confirmação enviado para: " . $email);
+                }
             } catch (Exception $e) {
                 error_log("Erro ao enviar email: " . $e->getMessage());
             }
@@ -81,15 +92,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (file_exists(__DIR__ . '/../config/sms.php')) {
                     require_once __DIR__ . '/../config/sms.php';
                     if (defined('SMS_ENABLED') && SMS_ENABLED) {
-                        enviarSMSConfirmacao($codigo, $db);
-                        error_log("SMS de confirmação enviado para: " . $telemovel);
+                        $resultadoSms = enviarSMSConfirmacao($codigo, $db);
+                        if ($resultadoSms) {
+                            $smsEnviado = true;
+                            error_log("SMS de confirmação enviado para: " . $telemovel);
+                        }
                     }
                 }
             } catch (Exception $e) {
                 error_log("Erro ao enviar SMS: " . $e->getMessage());
             }
 
-            logSeguranca('agendamento_criado', ['codigo' => $codigo, 'email' => $email]);
+            // Atualizar tracking de notificações na base de dados
+            $stmt = $db->prepare("UPDATE agendamentos SET
+                notificacao_email_enviada = ?,
+                notificacao_sms_enviada = ?,
+                data_notificacao_email = NOW(),
+                data_notificacao_sms = NOW()
+                WHERE id = ?");
+            $stmt->execute([$emailEnviado ? 1 : 0, $smsEnviado ? 1 : 0, $agendamentoId]);
+
+            logSeguranca('agendamento_criado', ['codigo' => $codigo, 'email' => $email, 'email_enviado' => $emailEnviado, 'sms_enviado' => $smsEnviado]);
             redirect(SITE_URL . 'confirmacao.php?codigo=' . urlencode($codigo));
         }
     }
@@ -139,12 +162,25 @@ include 'includes/header.php';
             <!-- Step 1: Data e Hora -->
             <div class="step-content" id="stepContent1">
                 <div class="form-group">
-                    <label for="data">📅 Data *</label>
-                    <input type="date" id="data" name="data" required min="<?= date('Y-m-d') ?>" data-validate="data-futura">
+                    <label>📅 Selecione a Data *</label>
+                    <div class="calendario" id="calendarioWidget">
+                        <div class="calendario-header">
+                            <button type="button" class="calendario-nav-btn" onclick="mudarMes(-1)">❮</button>
+                            <h3 id="calendarioMes"><?= date('F Y') ?></h3>
+                            <button type="button" class="calendario-nav-btn" onclick="mudarMes(1)">❯</button>
+                        </div>
+                        <div class="dias-semana">
+                            <span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span>Dom</span>
+                        </div>
+                        <div class="dias-mes" id="calendarioDias">
+                            <!-- Dias gerados por JavaScript -->
+                        </div>
+                    </div>
+                    <input type="hidden" id="data" name="data" required>
                 </div>
 
-                <div class="form-group">
-                    <label for="hora">🕐 Hora *</label>
+                <div class="form-group" id="horariosSection" style="display: none;">
+                    <label for="hora">🕐 Horários Disponíveis para <span id="dataSelecionadaLabel"></span> *</label>
                     <div id="slotsHorario" class="slots-horario">
                         <p style="color: var(--text-light);">Selecione uma data primeiro</p>
                     </div>
@@ -152,7 +188,7 @@ include 'includes/header.php';
                 </div>
 
                 <div class="text-right mt-2">
-                    <button type="button" class="btn btn-primary" onclick="nextStep(1)">Continuar ➝</button>
+                    <button type="button" class="btn btn-primary" id="btnContinuarStep1" onclick="nextStep(1)" disabled>Continuar ➝</button>
                 </div>
             </div>
 
@@ -219,14 +255,145 @@ const duracao = <?= $dados['duracao_minutos'] ?>;
 let stepAtual = 1;
 const totalSteps = 3;
 
-document.getElementById('data').addEventListener('change', carregarHorarios);
+// Variáveis do calendário
+let mesAtual = new Date();
+let disponibilidadeMensal = {};
+let dataSelecionadaCalendario = null;
 
-async function carregarHorarios() {
-    const data = document.getElementById('data').value;
-    if (!data) return;
+// Nomes dos meses em português
+const mesesPT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
+// Inicializar calendário ao carregar
+document.addEventListener('DOMContentLoaded', () => {
+    renderizarCalendario();
+    carregarDisponibilidadeMensal();
+});
+
+// Carregar disponibilidade do mês inteiro
+async function carregarDisponibilidadeMensal() {
+    const mes = mesAtual.toISOString().slice(0, 7); // YYYY-MM
+    try {
+        const response = await fetch(`api_calendario.php?esquadra_id=${esquadraId}&mes=${mes}&servico_id=${servicoId}`);
+        disponibilidadeMensal = await response.json();
+        renderizarCalendario();
+    } catch (e) {
+        console.error('Erro ao carregar disponibilidade:', e);
+    }
+}
+
+// Renderizar calendário
+function renderizarCalendario() {
+    const container = document.getElementById('calendarioDias');
+    const mesLabel = document.getElementById('calendarioMes');
+
+    const ano = mesAtual.getFullYear();
+    const mes = mesAtual.getMonth();
+
+    mesLabel.textContent = `${mesesPT[mes]} ${ano}`;
+
+    // Primeiro dia do mês e total de dias
+    const primeiroDia = new Date(ano, mes, 1);
+    const ultimoDia = new Date(ano, mes + 1, 0);
+    const totalDias = ultimoDia.getDate();
+
+    // Dia da semana do primeiro dia (0=Domingo, convertir para segunda=0)
+    let diaSemanaPrimeiro = primeiroDia.getDay() - 1;
+    if (diaSemanaPrimeiro < 0) diaSemanaPrimeiro = 6;
+
+    // Data de hoje
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    let html = '';
+
+    // Células vazias antes do primeiro dia
+    for (let i = 0; i < diaSemanaPrimeiro; i++) {
+        html += '<div class="dia vazio"></div>';
+    }
+
+    // Dias do mês
+    for (let dia = 1; dia <= totalDias; dia++) {
+        const dataCompleta = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+        const dataObj = new Date(ano, mes, dia);
+
+        let classes = ['dia'];
+        let conteudo = dia;
+
+        // Verificar se é hoje
+        if (dataObj.getTime() === hoje.getTime()) {
+            classes.push('hoje');
+        }
+
+        // Verificar disponibilidade
+        if (disponibilidadeMensal[dataCompleta]) {
+            const info = disponibilidadeMensal[dataCompleta];
+            if (!info.disponivel) {
+                classes.push('desabilitado');
+            } else if (info.estado === 'limitado') {
+                classes.push('com-agendamentos');
+            }
+        } else {
+            classes.push('desabilitado');
+        }
+
+        // Verificar se está selecionado
+        if (dataSelecionadaCalendario === dataCompleta) {
+            classes.push('selecionado');
+        }
+
+        // Verificar se é passado
+        if (dataObj < hoje) {
+            classes.push('desabilitado');
+        }
+
+        html += `<div class="${classes.join(' ')}" onclick="selecionarData('${dataCompleta}', this)">${conteudo}</div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+// Navegação entre meses
+function mudarMes(direcao) {
+    mesAtual.setMonth(mesAtual.getMonth() + direcao);
+    dataSelecionadaCalendario = null;
+    document.getElementById('data').value = '';
+    document.getElementById('horaSelecionada').value = '';
+    document.getElementById('horariosSection').style.display = 'none';
+    document.getElementById('btnContinuarStep1').disabled = true;
+    carregarDisponibilidadeMensal();
+}
+
+// Selecionar data
+function selecionarData(data, element) {
+    // Remover seleção anterior
+    document.querySelectorAll('.dia.selecionado').forEach(el => el.classList.remove('selecionado'));
+
+    // Verificar se está desabilitado
+    if (element.classList.contains('desabilitado')) {
+        return;
+    }
+
+    // Selecionar novo
+    element.classList.add('selecionado');
+    dataSelecionadaCalendario = data;
+    document.getElementById('data').value = data;
+
+    // Mostrar seção de horários
+    const [ano, mes, dia] = data.split('-');
+    const dataFormatada = `${dia}/${mes}/${ano}`;
+    document.getElementById('dataSelecionadaLabel').textContent = dataFormatada;
+    document.getElementById('horariosSection').style.display = 'block';
+
+    // Carregar horários
+    carregarHorarios(data);
+}
+
+// Carregar horários disponíveis
+async function carregarHorarios(data) {
     const container = document.getElementById('slotsHorario');
     container.innerHTML = '<div class="skeleton" style="height: 100px;"></div>';
+    document.getElementById('horaSelecionada').value = '';
 
     try {
         const response = await fetch(`api_horarios.php?esquadra_id=${esquadraId}&data=${data}&duracao=${duracao}`);
@@ -239,25 +406,42 @@ async function carregarHorarios() {
             return;
         }
 
+        let html = '';
+        let temManha = false;
+        let temTarde = false;
+
         horarios.forEach(hora => {
-            const slot = document.createElement('div');
-            slot.className = 'slot' + (hora.disponivel ? '' : ' ocupado');
-            slot.textContent = hora.hora;
-            if (hora.disponivel) {
-                slot.onclick = () => selecionarHora(slot, hora.hora);
+            const horaNum = parseInt(hora.hora.split(':')[0]);
+            const periodo = horaNum < 12 ? 'manha' : 'tarde';
+
+            if (periodo === 'manha' && !temManha) {
+                html += '<div style="grid-column: 1/-1; margin-bottom: 10px;"><strong>Manhã</strong></div>';
+                temManha = true;
             }
-            container.appendChild(slot);
+            if (periodo === 'tarde' && !temTarde) {
+                html += '<div style="grid-column: 1/-1; margin: 10px 0;"><strong>Tarde</strong></div>';
+                temTarde = true;
+            }
+
+            const classeSlot = hora.disponivel ? 'slot' : 'slot ocupado';
+            const onclick = hora.disponivel ? `selecionarHora(this, '${hora.hora}')` : '';
+            html += `<div class="${classeSlot}" ${onclick}>${hora.hora}</div>`;
         });
 
-        // Auto-validar se já tem hora selecionada
+        container.innerHTML = html;
+
+        // Verificar se já tem hora selecionada
         const horaSelecionada = document.getElementById('horaSelecionada').value;
         if (horaSelecionada) {
-            Toast.success('Horários carregados!');
+            document.querySelectorAll('.slot').forEach(slot => {
+                if (slot.textContent.trim() === horaSelecionada) {
+                    slot.classList.add('selecionado');
+                }
+            });
         }
     } catch (e) {
         console.error('Erro ao carregar horários:', e);
         container.innerHTML = '<p style="color: var(--danger);">Erro ao carregar horários. Tente novamente.</p>';
-        Toast.error('Erro ao carregar horários');
     }
 }
 
@@ -265,7 +449,7 @@ function selecionarHora(element, hora) {
     document.querySelectorAll('.slot').forEach(s => s.classList.remove('selecionado'));
     element.classList.add('selecionado');
     document.getElementById('horaSelecionada').value = hora;
-    Toast.success(`Horário selecionado: ${hora}`);
+    document.getElementById('btnContinuarStep1').disabled = false;
 }
 
 function nextStep(step) {

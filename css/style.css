@@ -336,17 +336,24 @@ nav a:hover {
     gap: 10px;
 }
 
-.calendario-nav button {
+.calendario-nav button,
+.calendario-nav-btn {
     background: var(--light-bg);
     border: none;
     padding: 8px 15px;
     border-radius: var(--border-radius);
     cursor: pointer;
     font-size: 1.2rem;
+    transition: background 0.3s;
 }
 
-.calendario-nav button:hover {
+.calendario-nav button:hover,
+.calendario-nav-btn:hover {
     background: #e0e0e0;
+}
+
+.calendario-nav-btn {
+    min-width: 40px;
 }
 
 .dias-semana {

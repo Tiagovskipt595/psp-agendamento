@@ -183,7 +183,7 @@ include 'includes/header.php';
                                         <?php endif; ?>
                                         <?php if ($agendamento['estado'] === 'em_atendimento'): ?>
                                             <button class="btn btn-success" style="padding: 5px 10px; font-size: 0.85rem;"
-                                                    onclick="atualizarEstado(<?= $agendamento['id'] ?>, 'concluido')">
+                                                    onclick="mostrarModalConcluir(<?= $agendamento['id'] ?>)">
                                                 ✓✓
                                             </button>
                                         <?php endif; ?>
@@ -198,11 +198,54 @@ include 'includes/header.php';
                     </tbody>
                 </table>
             <?php endif; ?>
+
+            <!-- Modal para Concluir Atendimento -->
+            <div class="modal-overlay" id="modalConcluir">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>Concluir Atendimento</h3>
+                        <button type="button" class="modal-close" onclick="fecharModal()">&times;</button>
+                    </div>
+                    <form id="formConcluirDashboard">
+                        <input type="hidden" id="concluirId" name="id">
+
+                        <div class="form-group">
+                            <label for="resultado">Resultado *</label>
+                            <select id="resultado" name="resultado" required>
+                                <option value="">Selecione...</option>
+                                <option value="atendido">✅ Atendido</option>
+                                <option value="nao_atendido">❌ Não Atendido</option>
+                                <option value="documentos_faltantes">📄 Documentos Faltantes</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="observacoesFim">Observações</label>
+                            <textarea id="observacoesFim" name="observacoes" rows="4"
+                                      placeholder="Notas sobre o atendimento..."></textarea>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+                            <button type="submit" class="btn btn-success">Confirmar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
+function mostrarModalConcluir(id) {
+    document.getElementById('concluirId').value = id;
+    document.getElementById('modalConcluir').classList.add('ativo');
+}
+
+function fecharModal() {
+    document.getElementById('modalConcluir').classList.remove('ativo');
+}
+
 async function atualizarEstado(id, novoEstado) {
     if (!confirm('Confirmar mudança de estado para: ' + novoEstado)) return;
 
@@ -227,6 +270,38 @@ async function atualizarEstado(id, novoEstado) {
         Toast.error('Erro ao atualizar estado');
     }
 }
+
+document.getElementById('formConcluirDashboard').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const id = document.getElementById('concluirId').value;
+    const resultado = document.getElementById('resultado').value;
+    const observacoes = document.getElementById('observacoesFim').value;
+
+    if (!resultado) {
+        Toast.warning('Selecione um resultado');
+        return;
+    }
+
+    try {
+        const response = await fetch('api_atender.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `id=${id}&action=conclude&resultado=${resultado}&observacoes=${encodeURIComponent(observacoes)}`
+        });
+        const data = await response.json();
+
+        if (data.sucesso) {
+            Toast.success('Atendimento concluído!');
+            fecharModal();
+            setTimeout(() => location.reload(), 500);
+        } else {
+            Toast.error('Erro: ' + (data.erro || data.mensagem));
+        }
+    } catch (e) {
+        Toast.error('Erro ao concluir atendimento');
+    }
+});
 
 function exportarCSV() {
     const periodo = document.getElementById('filtroPeriodo').value;
