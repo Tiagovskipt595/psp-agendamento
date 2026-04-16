@@ -513,7 +513,7 @@
             <nav>
                 <ul>
                     <li><a href="index.html">Início</a></li>
-                    <li><a href="login.php" class="btn-login">Área do Agente</a></li>
+                    <li><a href="#" onclick="alert('A área do agente requer um servidor PHP com base de dados.'); return false;" class="btn-login">Área do Agente</a></li>
                 </ul>
             </nav>
         </div>
@@ -530,7 +530,7 @@
                     <a href="#esquadras" class="btn btn-primary">
                         📍 Selecionar Esquadra
                     </a>
-                    <a href="validar.php" class="btn btn-success">
+                    <a href="#" onclick="alert('Validar agendamento requer um servidor PHP com base de dados.'); return false;" class="btn btn-success">
                         ✅ Validar Agendamento
                     </a>
                 </div>
@@ -591,30 +591,18 @@
     </footer>
 
     <script>
-    let esquadras = [];
+    // Dados das esquadras (hardcoded para versão estática)
+    // Em produção, estes dados viriam da base de dados via PHP
+    const esquadras = [
+        { id: 1, nome: 'Esquadra de São Sebastião', morada: 'Rua Alexandre Herculano, Lisboa', telefone: '213 555 100' },
+        { id: 2, nome: 'Esquadra de Alvalade', morada: 'Av. de Roma, Lisboa', telefone: '213 555 200' },
+        { id: 3, nome: 'Esquadra de Belém', morada: 'Praça do Império, Lisboa', telefone: '213 555 300' }
+    ];
 
-    // Carregar esquadras ao iniciar
+    // Renderizar esquadras ao carregar
     document.addEventListener('DOMContentLoaded', () => {
-        carregarEsquadras();
+        renderizarEsquadras(esquadras);
     });
-
-    async function carregarEsquadras() {
-        try {
-            const response = await fetch('api_esquadras.php');
-            if (!response.ok) throw new Error('Erro ao carregar');
-            esquadras = await response.json();
-            renderizarEsquadras(esquadras);
-        } catch (error) {
-            console.error('Erro:', error);
-            document.getElementById('gridEsquadras').innerHTML = `
-                <div class="card-esquadra" style="grid-column: 1/-1; text-align: center; padding: 3rem;">
-                    <span style="font-size: 2rem;">⚠️</span>
-                    <p style="margin-top: 1rem; color: #666;">Erro ao carregar esquadras. Tente novamente.</p>
-                    <button class="btn btn-primary" style="margin-top: 1rem;" onclick="carregarEsquadras()">Tentar novamente</button>
-                </div>
-            `;
-        }
-    }
 
     function renderizarEsquadras(lista) {
         const grid = document.getElementById('gridEsquadras');
@@ -659,7 +647,8 @@
     }
 
     function selecionarEsquadra(esquadraId) {
-        window.location.href = 'servicos.php?esquadra_id=' + esquadraId;
+        // Para versão estática, mostrar mensagem
+        alert('Para agendar, é necessário um servidor PHP com base de dados.\n\nEsta versão demonstra apenas a interface.');
     }
 
     // Smooth scroll para links internos
